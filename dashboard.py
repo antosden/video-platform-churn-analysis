@@ -1,70 +1,176 @@
 import gradio as gr
-from hypothesis.h4 import *
+import pandas as pd
+import numpy as np
+
+from hypothesis.dataset import prepare_dataset
+from hypothesis.h0 import calc_phi_results, plot_phi_bar
+from hypothesis.h1 import plot_threshold_churn
+from hypothesis.h4 import plot_city_overview, compare_two_cities
 
 
+def main():
+    df, city_tbl, all_cities, city_count = prepare_dataset()
 
-with gr.Blocks() as demo:
-    with gr.Tab("Гипотеза 1"):
-        gr.Markdown("")
+    with gr.Blocks(title="VideoStreaming Dashboard") as demo:
+        st_df = gr.State(df)
+        st_city_tbl = gr.State(city_tbl)
 
-    with gr.Tab("Гипотеза 2"):
-        gr.Markdown("")
+        with gr.Tabs():
+            with gr.TabItem("Гипотеза 0"):
+                gr.Markdown("## Категориальные признаки ↔ отток")
 
-    with gr.Tab("Гипотеза 3"):
-        gr.Markdown("")
+                with gr.Row():
+                    with gr.Column(scale=2, min_width=720):
+                        with gr.Tabs():
+                            with gr.TabItem("Сила связи (φ)"):
+                                phi_plot = gr.Plot()
 
-    with gr.Tab("Гипотеза 4"):
-        gr.Markdown("## Гипотеза 4: География <-> просмотр <-> отток")
-        with gr.Row():
-            top_n = gr.Slider(3, CITY_COUNT, value=10, step=1, label="Топ городов по просмотрам")
-            sort_by = gr.Radio(
-                choices=["churn_rate_%", "avg_watch", "users"],
-                value="churn_rate_%",
-                label="Sort by"
-            )
+                            with gr.TabItem("Таблица значений"):
+                                phi_table = gr.Dataframe(interactive=False)
 
-        btn = gr.Button("Применить")
+                def render_h0(df_in: pd.DataFrame):
+                    data_encoded = pd.get_dummies(
+                        df_in,
+                        columns=["city", "device", "source", "favourite_genre"],
+                        drop_first=False,
+                    )
 
-        plot = gr.Plot(label="Топ городов")
-        table = gr.Dataframe(interactive=False, label="Топ городов")
+                    phi_df = calc_phi_results(data_encoded, alpha=0.05)
+                    fig = plot_phi_bar(phi_df, top_k=25)
 
-        btn.click(
-            fn=plot_city_bars_plotly,
-            inputs=[top_n, sort_by],
-            outputs=[plot, table],
-        )
+                    return fig, phi_df
 
-        demo.load(
-            fn=plot_city_bars_plotly,
-            inputs=[top_n, sort_by],
-            outputs=[plot, table],
-        )
+                demo.load(
+                    fn=render_h0,
+                    inputs=[st_df],
+                    outputs=[phi_plot, phi_table],
+                )
 
-        gr.Markdown("---")
-        gr.Markdown("### Сравнение двух городов")
+            with gr.TabItem("Гипотеза 1"):
+                default_thr = float(np.nanmedian(df["avg_min_watch_daily"])) if len(df) else 10.0
+                default_thr = max(1.0, round(default_thr))
 
-        with gr.Row():
-            city_a = gr.Dropdown(choices=ALL_CITIES, value="Уфа" if "Уфа" in ALL_CITIES else ALL_CITIES[0], label="City A")
-            city_b = gr.Dropdown(choices=ALL_CITIES, value="Екатеринбург" if "Екатеринбург" in ALL_CITIES else ALL_CITIES[min(1, len(ALL_CITIES)-1)], label="City B")
+                max_thr = float(np.nanmax(df["avg_min_watch_daily"])) if len(df) else 60.0
+                max_thr = max(10.0, round(max_thr))
+                gr.Markdown("## Гипотеза 1: Время просмотра ↔ отток/подписка")
 
-        with gr.Row():
-            kpi_watch = gr.Textbox(label="delta Avg watch (A - B)", value="—", interactive=False)
-            kpi_churn = gr.Textbox(label="delta Churn rate (A - B)", value="—", interactive=False)
-            kpi_users = gr.Textbox(label="delta Users (A - B)", value="—", interactive=False)
+                threshold = gr.Slider(
+                    minimum=1,
+                    maximum=max_thr,
+                    value=min(default_thr, max_thr),
+                    step=1,
+                    label="Порог среднего времени просмотра (мин/день)",
+                )
 
-        cmp_plot = gr.Plot(label="Comparison chart")
-        cmp_table = gr.Dataframe(interactive=False, label="Comparison table")
+                h1_plot = gr.Plot(label="Churn rate по группам")
+                h1_table = gr.Dataframe(interactive=False, label="Таблица по группам")
 
-        city_a.change(
-            fn=compare_two_cities_plotly,
-            inputs=[city_a, city_b],
-            outputs=[cmp_plot, cmp_table, kpi_watch, kpi_churn, kpi_users],
-        )
-        city_b.change(
-            fn=compare_two_cities_plotly,
-            inputs=[city_a, city_b],
-            outputs=[cmp_plot, cmp_table, kpi_watch, kpi_churn, kpi_users],
-        )
+                def do_h1(df_in, thr):
+                    return plot_threshold_churn(df_in, float(thr))
+                demo.load(
+                    fn=do_h1,
+                    inputs=[st_df, threshold],
+                    outputs=[h1_plot, h1_table],
+                )
+
+                threshold.change(
+                    fn=do_h1,
+                    inputs=[st_df, threshold],
+                    outputs=[h1_plot, h1_table],
+                )
+
+            with gr.TabItem("Гипотеза 2"):
+                gr.Markdown("TODO: Valentina")
+
+            with gr.TabItem("Гипотеза 3"):
+                gr.Markdown("TODO: Valentina")
+
+            with gr.TabItem("Гипотеза 4"):
+                gr.Markdown("## География ↔ просмотр ↔ отток")
+
+                with gr.Row():
+                    with gr.Column(scale=1, min_width=360):
+                        top_n = gr.Slider(
+                            minimum=3,
+                            maximum=city_count,
+                            value=min(10, city_count),
+                            step=1,
+                            label="Количество городов",
+                        )
+
+                        sort_by = gr.Radio(
+                            choices=["% оттока", "Среднее время просмотра", "Пользователи"],
+                            value="% оттока",
+                            label="Сортировка",
+                        )
+
+                        highlight_cities = gr.Dropdown(
+                            choices=all_cities,
+                            value=[],
+                            multiselect=True,
+                            label="Подсветить города",
+                        )
+
+                        gr.Markdown("### Сравнение городов")
+
+                        city_a = gr.Dropdown(
+                            choices=all_cities,
+                            value=all_cities[0],
+                            label="Город A",
+                        )
+                        city_b = gr.Dropdown(
+                            choices=all_cities,
+                            value=all_cities[1],
+                            label="Город B",
+                        )
+
+                    with gr.Column(scale=2, min_width=720):
+                        with gr.Tabs():
+                            with gr.TabItem("Обзор"):
+                                overview_plot = gr.Plot()
+
+                            with gr.TabItem("Сравнение"):
+                                with gr.Row():
+                                    delta_watch = gr.Textbox(label="Δ Avg watch (A − B)")
+                                    delta_churn = gr.Textbox(label="Δ Churn % (A − B)")
+                                    delta_users = gr.Textbox(label="Δ Users (A − B)")
+
+                                compare_plot = gr.Plot()
+
+                def update_overview(tbl, n, sort, highlight):
+                    return plot_city_overview(
+                        city_tbl=tbl,
+                        top_n=int(n),
+                        sort_by=str(sort),
+                        highlight_cities=highlight or [],
+                    )
+
+                def update_compare(tbl, a, b):
+                    return compare_two_cities(tbl, str(a), str(b))
+
+                demo.load(
+                    fn=update_overview,
+                    inputs=[st_city_tbl, top_n, sort_by, highlight_cities],
+                    outputs=[overview_plot],
+                )
+
+                top_n.change(update_overview, [st_city_tbl, top_n, sort_by, highlight_cities], overview_plot)
+                sort_by.change(update_overview, [st_city_tbl, top_n, sort_by, highlight_cities], overview_plot)
+                highlight_cities.change(update_overview, [st_city_tbl, top_n, sort_by, highlight_cities], overview_plot)
+
+                demo.load(
+                    fn=update_compare,
+                    inputs=[st_city_tbl, city_a, city_b],
+                    outputs=[delta_watch, delta_churn, delta_users, compare_plot],
+                )
+
+                city_a.change(update_compare, [st_city_tbl, city_a, city_b],
+                              [delta_watch, delta_churn, delta_users, compare_plot])
+                city_b.change(update_compare, [st_city_tbl, city_a, city_b],
+                              [delta_watch, delta_churn, delta_users, compare_plot])
+
+        demo.launch()
 
 
-demo.launch()
+if __name__ == "__main__":
+    main()

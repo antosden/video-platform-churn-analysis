@@ -1,43 +1,29 @@
 import numpy as np
-import plotly.graph_objects as go
 import pandas as pd
-from hypothesis.dataset import get_clean_dataset
+import plotly.graph_objects as go
 
-def build_city_table(data: pd.DataFrame) -> pd.DataFrame:
-    tbl = (
-        data.groupby("city", as_index=False)
-        .agg(
-            avg_watch=("avg_min_watch_daily", "mean"),
-            churn_rate=("churn", "mean"),
-            users=("user_id", "count"),
-        )
-    )
-    tbl["churn_rate_%"] = tbl["churn_rate"] * 100
-    return tbl
-
-DF = get_clean_dataset()
-CITY_TBL = build_city_table(DF)
-ALL_CITIES = sorted(CITY_TBL["city"].astype(str).unique().tolist())
-CITY_COUNT = CITY_TBL["city"].nunique()
-
-
-def plot_city_bars_plotly(
-    top_n: int = 10,
-    sort_by: str = "churn_rate_%",
-):
-    tbl = CITY_TBL.copy()
-
+def _sort_city_tbl(tbl: pd.DataFrame, sort_by: str) -> pd.DataFrame:
     if sort_by == "avg_watch":
-        tbl = tbl.sort_values("avg_watch", ascending=False)
-    elif sort_by == "users":
-        tbl = tbl.sort_values("users", ascending=False)
-    else:
-        tbl = tbl.sort_values("churn_rate_%", ascending=False)
+        return tbl.sort_values("avg_watch", ascending=False)
+    if sort_by == "users":
+        return tbl.sort_values("users", ascending=False)
+    return tbl.sort_values("churn_rate", ascending=False)
 
+
+def plot_city_overview(
+    city_tbl: pd.DataFrame,
+    top_n: int,
+    sort_by: str,
+    highlight_cities: list[str] | None,
+):
+    tbl = city_tbl.copy()
+    tbl = _sort_city_tbl(tbl, sort_by)
     tbl = tbl.head(int(top_n)).copy()
 
-    watch_colors = ["#ff7f0e"] * len(tbl)
-    churn_colors = ["#1f77b4"] * len(tbl)
+    highlight_set = set(highlight_cities or [])
+
+    watch_colors = ["#ff7f0e" if c in highlight_set else "#ffb55a" for c in tbl["city"]]
+    churn_colors = ["#1f77b4" if c in highlight_set else "#8bb9ff" for c in tbl["city"]]
 
     hover_watch = (
         "<b>%{x}</b><br>"
@@ -52,12 +38,11 @@ def plot_city_bars_plotly(
 
     fig = go.Figure()
 
-    # Avg watch (левая ось)
     fig.add_trace(
         go.Bar(
             x=tbl["city"],
             y=tbl["avg_watch"],
-            name="Avg watch (min/day)",
+            name="Время просмотра (min/day)",
             marker_color=watch_colors,
             opacity=0.9,
             customdata=np.stack([tbl["users"]], axis=-1),
@@ -67,12 +52,11 @@ def plot_city_bars_plotly(
         )
     )
 
-    # Churn rate % (правая ось)
     fig.add_trace(
         go.Bar(
             x=tbl["city"],
-            y=tbl["churn_rate_%"],
-            name="Churn rate (%)",
+            y=tbl["churn_rate"],
+            name="Отток (%)",
             marker_color=churn_colors,
             opacity=0.9,
             customdata=np.stack([tbl["users"]], axis=-1),
@@ -83,99 +67,84 @@ def plot_city_bars_plotly(
     )
 
     fig.update_layout(
-        title="Города: Avg watch time vs Churn rate",
+        autosize=True,
+        title="Города: Время просмотра (min/day) vs Отток (%)",
         barmode="group",
-        xaxis=dict(title="City", tickangle=-25),
-        yaxis=dict(title="Avg watch (min/day)"),
-        yaxis2=dict(title="Churn rate (%)", overlaying="y", side="right"),
+        xaxis=dict(title="Город", tickangle=-25),
+        yaxis=dict(title="Время просмотра (min/day)"),
+        yaxis2=dict(title="Отток (%)", overlaying="y", side="right"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         margin=dict(l=60, r=60, t=70, b=90),
         height=520,
     )
 
-    show_tbl = tbl[["city", "avg_watch", "churn_rate_%", "users"]].copy()
+    show_tbl = tbl[["city", "avg_watch", "churn_rate", "users"]].copy()
     show_tbl["avg_watch"] = show_tbl["avg_watch"].round(3)
-    show_tbl["churn_rate_%"] = show_tbl["churn_rate_%"].round(2)
+    show_tbl["churn_rate"] = show_tbl["churn_rate"].round(2)
 
-    return fig, show_tbl
-
-
-def compare_two_cities_plotly(city_a: str, city_b: str):
-    tbl = CITY_TBL.copy()
-    tbl["city"] = tbl["city"].astype(str)
-
-    pick = tbl[tbl["city"].isin([city_a, city_b])].copy().drop_duplicates(subset=["city"])
-
-    # KPI / table base
-    show_tbl = pick[["city", "avg_watch", "churn_rate_%", "users"]].copy()
-    show_tbl["avg_watch"] = show_tbl["avg_watch"].round(3)
-    show_tbl["churn_rate_%"] = show_tbl["churn_rate_%"].round(2)
-
-    # KPI deltas
-    delta_watch = "—"
-    delta_churn = "—"
-    delta_users = "—"
-    if len(show_tbl) == 2:
-        a = show_tbl[show_tbl["city"] == city_a].iloc[0]
-        b = show_tbl[show_tbl["city"] == city_b].iloc[0]
-        delta_watch = f"{float(a['avg_watch'] - b['avg_watch']):+.3f} min/day"
-        delta_churn = f"{float(a['churn_rate_%'] - b['churn_rate_%']):+.2f} pp"
-        delta_users = f"{int(a['users'] - b['users']):+d}"
+    return fig
 
 
-    watch_colors = "#ffb55a"
-    churn_colors = "#8bb9ff"
+def compare_two_cities(city_tbl: pd.DataFrame, city_a: str, city_b: str):
+    tbl = city_tbl.copy()
 
-    hover_watch = (
-        "<b>%{x}</b><br>"
-        "Avg watch: %{y:.3f} min/day<br>"
-        "Users: %{customdata[0]}<extra></extra>"
-    )
-    hover_churn = (
-        "<b>%{x}</b><br>"
-        "Churn rate: %{y:.2f}%<br>"
-        "Users: %{customdata[0]}<extra></extra>"
-    )
+    a = tbl[tbl["city"] == city_a].head(1)
+    b = tbl[tbl["city"] == city_b].head(1)
+
+    if a.empty or b.empty:
+        return "—", "—", "—", go.Figure(), pd.DataFrame()
+
+    a = a.iloc[0]
+    b = b.iloc[0]
+
+    delta_watch = float(a["avg_watch"] - b["avg_watch"])
+    delta_churn = float(a["churn_rate"] - b["churn_rate"])
+    delta_users = int(a["users"] - b["users"])
+
+    delta_watch_txt = f"{delta_watch:+.3f} min/day"
+    delta_churn_txt = f"{delta_churn:+.2f} pp"
+    delta_users_txt = f"{delta_users:+d}"
 
     fig = go.Figure()
 
-    fig.add_trace(go.Bar(
-        x=pick["city"],
-        y=pick["avg_watch"],
-        name="Avg watch (min/day)",
-        marker_color=watch_colors,
-        opacity=0.9,
-        customdata=np.stack([pick["users"]], axis=-1),
-        hovertemplate=hover_watch,
-        offsetgroup=0,
-        yaxis="y",
-    ))
-
-    fig.add_trace(go.Bar(
-        x=pick["city"],
-        y=pick["churn_rate_%"],
-        name="Churn rate (%)",
-        marker_color=churn_colors,
-        opacity=0.9,
-        customdata=np.stack([pick["users"]], axis=-1),
-        hovertemplate=hover_churn,
-        offsetgroup=1,
-        yaxis="y2",
-    ))
-
-    fig.update_layout(
-        title="Сравнить два города: Avg watch vs Churn",
-        barmode="group",
-        xaxis=dict(title="City"),
-        yaxis=dict(title="Avg watch (min/day)"),
-        yaxis2=dict(title="Churn rate (%)", overlaying="y", side="right"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        margin=dict(l=60, r=60, t=70, b=60),
-        height=430,
+    fig.add_trace(
+        go.Bar(
+            x=[city_a, city_b],
+            y=[a["avg_watch"], b["avg_watch"]],
+            name="Время просмотра (min/day)",
+            marker_color="#ff7f0e",
+            opacity=0.85,
+            offsetgroup=0,
+            yaxis="y",
+        )
     )
 
-    return fig, show_tbl, delta_watch, delta_churn, delta_users
+    fig.add_trace(
+        go.Bar(
+            x=[city_a, city_b],
+            y=[a["churn_rate"], b["churn_rate"]],
+            name="Отток (%)",
+            marker_color="#1f77b4",
+            opacity=0.85,
+            offsetgroup=1,
+            yaxis="y2",
+        )
+    )
 
+    fig.update_layout(
+        autosize=True,
+        title="Сравнить два города: Время просмотра (min/day) vs Отток (%)",
+        barmode="group",
+        xaxis=dict(title="Город"),
+        yaxis=dict(title="Время просмотра (min/day)"),
+        yaxis2=dict(title="Отток (%)", overlaying="y", side="right"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(l=60, r=60, t=70, b=80),
+        height=420,
+    )
 
-def swap_cities(a: str, b: str):
-    return b, a
+    show_tbl = tbl[tbl["city"].isin([city_a, city_b])][["city", "avg_watch", "churn_rate", "users"]].copy()
+    show_tbl["avg_watch"] = show_tbl["avg_watch"].round(3)
+    show_tbl["churn_rate"] = show_tbl["churn_rate"].round(2)
+
+    return delta_watch_txt, delta_churn_txt, delta_users_txt, fig, show_tbl
