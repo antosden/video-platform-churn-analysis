@@ -1,7 +1,4 @@
-import pandas as pd
-import numpy as np
 import gradio as gr
-import plotly.graph_objects as go
 from hypothesis.h4 import *
 
 

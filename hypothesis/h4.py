@@ -1,14 +1,7 @@
 import numpy as np
 import plotly.graph_objects as go
 import pandas as pd
-
-
-df = pd.read_csv("videostreaming_platform.csv")
-
-# минимальная чистка
-df["city"] = df["city"].fillna("Unknown")
-df["avg_min_watch_daily"] = pd.to_numeric(df["avg_min_watch_daily"], errors="coerce")
-df["churn"] = pd.to_numeric(df["churn"], errors="coerce")
+from hypothesis.dataset import get_clean_dataset
 
 def build_city_table(data: pd.DataFrame) -> pd.DataFrame:
     tbl = (
@@ -22,11 +15,11 @@ def build_city_table(data: pd.DataFrame) -> pd.DataFrame:
     tbl["churn_rate_%"] = tbl["churn_rate"] * 100
     return tbl
 
-
-
-CITY_TBL = build_city_table(df)
+DF = get_clean_dataset()
+CITY_TBL = build_city_table(DF)
 ALL_CITIES = sorted(CITY_TBL["city"].astype(str).unique().tolist())
 CITY_COUNT = CITY_TBL["city"].nunique()
+
 
 def plot_city_bars_plotly(
     top_n: int = 10,
@@ -34,7 +27,6 @@ def plot_city_bars_plotly(
 ):
     tbl = CITY_TBL.copy()
 
-    # сортировка
     if sort_by == "avg_watch":
         tbl = tbl.sort_values("avg_watch", ascending=False)
     elif sort_by == "users":
